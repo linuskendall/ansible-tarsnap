@@ -1,0 +1,118 @@
+- name: Install tarnsap dependencies
+  apt: pkg="{{item}}" state=installed cache_valid_time=3600
+  with_items:
+    - gpgv2
+    - build-essentials
+    - libssl-dev
+    - zlib1g-dev
+    - e2fslibs-dev
+    - anacron
+  tags: 
+    - tarsnap
+  when: ansible_os_family == 'Debian'
+
+- name: Install tarnsap dependencies
+  yum: pkg="{{item}}" state=installed 
+  with_items:
+    - gnupg2
+    - gcc
+    - openssl-devel
+    - zlib-devel
+    - e2fsprogs-devel
+    - cronie-anacron
+  tags: 
+    - tarsnap
+  when: ansible_os_family == 'RedHat'
+
+- name: Download the current tarsnap code signing key
+  get_url:
+    url=https://www.tarsnap.com/tarsnap-signing-key.asc
+    dest="{{tarsnap_base_dir}}/tarsnap-signing-key.asc"
+  tags: 
+    - tarsnap
+
+- name: Add the tarsnap code signing key to your list of keys
+  command: "{{ gpg_bin }} --import tarsnap-signing-key.asc"
+  args:
+    chdir: "{{tarsnap_base_dir}}"
+  when: ansible_distribution != "Fedora"
+  tags: 
+    - tarsnap
+
+- name: Add the tarsnap code signing key to your list of keys
+  command: "{{ gpg_bin }} --import tarsnap-signing-key.asc"
+  args:
+    chdir: "{{tarsnap_base_dir}}"
+  when: ansible_distribution == "Fedora"
+  tags: 
+    - tarsnap
+        
+- name: Download tarsnap SHA file
+  get_url:
+    url="https://www.tarsnap.com/download/tarsnap-sigs-{{tarsnap_version}}.asc"
+    dest="{{tarsnap_base_dir}}/tarsnap-sigs-{{tarsnap_version}}.asc"
+  tags: 
+    - tarsnap
+    
+- name: Make the command that gets the current sha
+  template:
+    src=getSha.sh
+    dest="{{tarsnap_base_dir}}/getSha.sh"
+    mode=0755
+  tags: 
+    - tarsnap
+    
+- name: get the SHA256sum for this tarsnap release
+  command:
+    ./getSha.sh
+    chdir={{tarsnap_base_dir}}
+  register: tarsnap_sha
+  tags: 
+    - tarsnap
+  
+- name: Download Tarsnap source
+  get_url:
+    url="https://www.tarsnap.com/download/tarsnap-autoconf-{{tarsnap_version}}.tgz"
+    dest="{{tarsnap_base_dir}}/tarsnap-autoconf-{{tarsnap_version}}.tgz"
+    sha256sum={{tarsnap_sha.stdout_lines[0]}}
+  tags: 
+    - tarsnap
+
+- name: Decompress Tarsnap source
+  command:
+    tar xzf "{{tarsnap_base_dir}}/tarsnap-autoconf-{{tarsnap_version}}.tgz"
+    chdir={{tarsnap_base_dir}}
+    creates="{{tarsnap_base_dir}}/tarsnap-autoconf-{{tarsnap_version}}/COPYING"
+  tags: 
+    - tarsnap
+
+- name: Configure Tarsnap for local build
+  command:
+    ./configure
+    chdir="{{tarsnap_base_dir}}/tarsnap-autoconf-{{tarsnap_version}}"
+    creates="{{tarsnap_base_dir}}/tarsnap-autoconf-{{tarsnap_version}}/Makefile"
+  tags: 
+    - tarsnap
+
+- name: Build and install Tarsnap
+  command:
+    make all install clean
+    chdir="{{tarsnap_base_dir}}/tarsnap-autoconf-{{tarsnap_version}}"
+    creates=/usr/local/bin/tarsnap
+  tags: 
+    - tarsnap
+
+- name: Install tarsnap.conf
+  template: src=tarsnap.conf.j2 dest=/usr/local/etc/tarsnap.conf mode=0755 owner=root group=root 
+  tags: 
+    - tarsnap
+
+- name: Install tarsnap backup script
+  template: src=tarsnap-backup.sh.j2 dest=/etc/cron.daily/tarsnap-backup mode=0755 owner=root group=root
+  tags: 
+    - tarsnap
+
+- name: Copy tarsnap key
+  copy: content="{{tarsnap_key}}" dest=/root/tarsnap.key mode=0600 owner=root group=root
+  tags: 
+    - tarsnap

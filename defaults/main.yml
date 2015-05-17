@@ -1,0 +1,4 @@
+tarsnap_version: 1.0.35
+tarsnap_base_dir: /root
+tarsnap_install_user: root
+gpg_bin: gpg2
